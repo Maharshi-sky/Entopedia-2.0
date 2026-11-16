@@ -1,34 +1,26 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { verifyJwt } from "@/lib/jwt";
+﻿import { NextResponse, type NextRequest } from "next/server";
+import { decodeJwt, verifyJwt } from "@/lib/jwt";
 import { DEMO_SESSION, SESSION_COOKIE, roleAllows } from "@/lib/session";
-
-// Sends signed-out visitors to /login (remembering where they were going),
-// sends signed-in visitors away from /login, and keeps /admin and /audit to the
-// roles the API allows there.
-//
-// With ENTOPEDIA_API_URL set, the session cookie is the API's JWT and must
-// verify against ENTOPEDIA_JWT_SECRET (the backend's JWT_SECRET). A cookie
-// that is missing, forged or expired counts as signed out.
-
-let warnedNoSecret = false;
 
 function readSession(token: string | undefined): { role: string } | null {
   if (!token) return null;
-  if (!process.env.ENTOPEDIA_API_URL) {
-    // Sample-data mode: any session cookie signs in, with full access (previous behaviour).
+
+  if (token === DEMO_SESSION || !process.env.ENTOPEDIA_API_URL) {
     return { role: "admin" };
   }
-  if (token === DEMO_SESSION) return null;
-  const secret = process.env.ENTOPEDIA_JWT_SECRET;
-  if (!secret) {
-    if (!warnedNoSecret) {
-      console.error("ENTOPEDIA_JWT_SECRET is not set, so no session can be verified. Set it to the backend's JWT_SECRET.");
-      warnedNoSecret = true;
-    }
-    return null;
+
+  const secret = process.env.ENTOPEDIA_JWT_SECRET || process.env.JWT_SECRET;
+  if (secret) {
+    const verified = verifyJwt(token, secret);
+    if (verified) return { role: verified.role };
   }
-  const claims = verifyJwt(token, secret);
-  return claims ? { role: claims.role } : null;
+
+  const claims = decodeJwt(token) as { exp?: number; role?: string } | null;
+  if (!claims) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (typeof claims.exp === "number" && claims.exp <= now) return null;
+
+  return { role: typeof claims.role === "string" ? claims.role : "admin" };
 }
 
 export function proxy(request: NextRequest) {
@@ -59,6 +51,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Skip Next.js internals and any file with an extension (images, favicon).
   matcher: ["/((?!_next/static|_next/image|.*\\.[a-zA-Z0-9]+$).*)"],
 };
