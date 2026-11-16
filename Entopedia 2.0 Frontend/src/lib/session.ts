@@ -8,7 +8,7 @@ export const ROLE_GATES: { prefix: string; roles: string[] }[] = [
 ];
 
 export function roleAllows(pathname: string, role: string): boolean {
-  const gate = ROLE_GATES.find((g) => pathname === g.prefix || pathname.startsWith(${g.prefix}/));
+  const gate = ROLE_GATES.find((g) => pathname === g.prefix || pathname.startsWith(`${g.prefix}/`));
   return !gate || gate.roles.includes(role);
 }
 
