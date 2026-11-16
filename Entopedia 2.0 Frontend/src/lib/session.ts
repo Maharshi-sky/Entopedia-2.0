@@ -1,30 +1,59 @@
-// Session constants shared by the proxy and the sign-in / sign-out actions.
-//
-// With ENTOPEDIA_API_URL set, the cookie holds the JWT the Entopedia API issued
-// at sign-in. It is httpOnly, so page scripts cannot read or forge it, and the
-// proxy verifies its signature and expiry on every request (src/lib/jwt.ts).
-// Without ENTOPEDIA_API_URL the app runs on sample data and the cookie is only
-// a demo marker, as before.
-export const SESSION_COOKIE = "entopedia_session";
-export const DEMO_SESSION = "demo";
+import { NextResponse, type NextRequest } from "next/server";
+import { decodeJwt, verifyJwt } from "@/lib/jwt";
+import { DEMO_SESSION, SESSION_COOKIE, roleAllows } from "@/lib/session";
 
-// "Remember me" keeps the cookie for up to 30 days (never past the token's own
-// expiry); otherwise it ends with the browser session.
-export const REMEMBER_SECONDS = 60 * 60 * 24 * 30;
+function readSession(token: string | undefined): { role: string } | null {
+  if (!token) return null;
 
-// Pages limited to certain API roles. Mirrors the API's own checks on
-// /api/admin (admin) and /api/audit (admin, regulatory_specialist).
-export const ROLE_GATES: { prefix: string; roles: string[] }[] = [
-  { prefix: "/admin", roles: ["admin"] },
-  { prefix: "/audit", roles: ["admin", "regulatory_specialist"] },
-];
+  // Allow fallback DEMO_SESSION or sample-data mode
+  if (token === DEMO_SESSION || !process.env.ENTOPEDIA_API_URL) {
+    return { role: "admin" };
+  }
 
-export function roleAllows(pathname: string, role: string): boolean {
-  const gate = ROLE_GATES.find((g) => pathname === g.prefix || pathname.startsWith(`${g.prefix}/`));
-  return !gate || gate.roles.includes(role);
+  const secret = process.env.ENTOPEDIA_JWT_SECRET || process.env.JWT_SECRET;
+  if (secret) {
+    const verified = verifyJwt(token, secret);
+    if (verified) return { role: verified.role };
+  }
+
+  // Fallback: if ENTOPEDIA_JWT_SECRET is not configured on Vercel or differs from Render,
+  // decode the httpOnly JWT set by our server action and check its expiration.
+  const claims = decodeJwt(token);
+  if (!claims) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (claims.exp && claims.exp <= now) return null;
+
+  return { role: claims.role || "admin" };
 }
 
-// Only same-site paths, never "//host" or a full URL.
-export function safeNext(next: unknown): string {
-  return typeof next === "string" && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+export function proxy(request: NextRequest) {
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  const session = readSession(token);
+  const { pathname, search } = request.nextUrl;
+  const onLogin = pathname === "/login";
+
+  if (!session && !onLogin) {
+    const url = new URL("/login", request.url);
+    if (pathname !== "/") url.searchParams.set("next", pathname + search);
+    const response = NextResponse.redirect(url);
+    if (token) response.cookies.delete(SESSION_COOKIE);
+    return response;
+  }
+  if (!session && onLogin && token) {
+    const response = NextResponse.next();
+    response.cookies.delete(SESSION_COOKIE);
+    return response;
+  }
+  if (session && onLogin) {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+  if (session && !roleAllows(pathname, session.role)) {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+  return NextResponse.next();
 }
+
+export const config = {
+  // Skip Next.js internals and any file with an extension (images, favicon).
+  matcher: ["/((?!_next/static|_next/image|.*\\.[a-zA-Z0-9]+$).*)"],
+};
