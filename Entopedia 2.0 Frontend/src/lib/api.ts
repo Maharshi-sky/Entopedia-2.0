@@ -41,6 +41,18 @@ export function dataSource(resource: Resource): "api" | "sample" {
   return backendUrl() && connected[resource] ? "api" : "sample";
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`API request timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
 async function load<K extends Resource>(resource: K): Promise<Store[K]> {
   "use cache";
   cacheLife("minutes");
@@ -48,7 +60,17 @@ async function load<K extends Resource>(resource: K): Promise<Store[K]> {
 
   const connection = connected[resource] as Connection<K> | undefined;
   if (!backendUrl() || !connection) return store[resource];
-  return connection.adapt(await backendGet(connection.path));
+
+  try {
+    const raw = await withTimeout(backendGet(connection.path), 8000);
+    return connection.adapt(raw);
+  } catch (err) {
+    console.warn(
+      `[api.load] Falling back to static store for "${resource}":`,
+      err instanceof Error ? err.message : err
+    );
+    return store[resource];
+  }
 }
 
 export const api = {
