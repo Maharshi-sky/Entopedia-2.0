@@ -9,3 +9,4 @@ dist/
 *.log
 /*.zip
 **/Entopedia 2.0 Frontend.zip
+*.zip
