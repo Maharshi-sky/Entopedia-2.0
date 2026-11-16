@@ -25,6 +25,7 @@ const connected: Connected = {
   signals: { path: "dashboard/alerts", adapt: adapt.toSignals },
   news: { path: "news?limit=100", adapt: adapt.toArticles },
   competitorProfiles: { path: "competitor?limit=100", adapt: adapt.toCompetitorProfiles },
+  products: { path: "competitor/products", adapt: adapt.toProducts },
   whiteSpace: { path: "patent/white-space?full=1", adapt: adapt.toWhiteSpace },
   patents: { path: "patent?limit=200", adapt: adapt.toPatents },
   actives: { path: "regulatory/actives?limit=500", adapt: adapt.toActives },
