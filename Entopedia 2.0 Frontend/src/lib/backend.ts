@@ -9,8 +9,10 @@ import { decodeJwt } from "./jwt";
 //   ENTOPEDIA_API_KEY       optional: a long-lived JWT to use instead of login
 
 export function backendUrl(): string | null {
-  const raw = process.env.ENTOPEDIA_API_URL || process.env.NEXT_PUBLIC_API_URL;
-  if (!raw) return null;
+  const raw =
+    process.env.ENTOPEDIA_API_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "https://entopedia-2-0-backend.onrender.com/api";
   const clean = raw.trim().replace(/^["']|["']$/g, "").replace(/\/+$/, "");
   return clean.endsWith("/api") ? clean : `${clean}/api`;
 }
@@ -36,7 +38,7 @@ export async function backendLogin(email: string, password: string): Promise<Log
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ email, password }),
       cache: "no-store",
-      signal: AbortSignal.timeout(7000),
+      signal: AbortSignal.timeout(25000),
     });
     const body = (await res.json().catch(() => ({}))) as Record<string, string>;
     if (!res.ok || !body.token) {
@@ -98,7 +100,7 @@ export async function backendGet<T = unknown>(path: string): Promise<T> {
     fetch(url, {
       headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
       cache: "no-store",
-      signal: AbortSignal.timeout(7000),
+      signal: AbortSignal.timeout(10000),
     });
 
   let res = await request(await serviceToken());
