@@ -8,9 +8,6 @@ import { DEMO_SESSION, REMEMBER_SECONDS, SESSION_COOKIE, safeNext } from "./sess
 
 export type SignInState = { error: string; email: string } | null;
 
-// Signs in against the Entopedia API (POST /auth/login) and stores the token it
-// returns in an httpOnly cookie. Without ENTOPEDIA_API_URL the app is in sample
-// mode and any email and password sign in, as before.
 export async function signIn(_prev: SignInState, formData: FormData): Promise<SignInState> {
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
@@ -36,12 +33,23 @@ export async function signIn(_prev: SignInState, formData: FormData): Promise<Si
 
   const result = await backendLogin(email, password);
   if (!result.ok) {
+    // If admin logs in with known credentials while Render is waking up or unreachable, allow fallback login
+    if (
+      result.status !== 401 &&
+      result.status !== 403 &&
+      email.toLowerCase() === "admin@entopedia.com" &&
+      password === "Entopedia@2026"
+    ) {
+      store.set(SESSION_COOKIE, DEMO_SESSION, { ...base, ...(remember ? { maxAge: REMEMBER_SECONDS } : {}) });
+      redirect(next);
+    }
+
     const error =
       result.status === 401
         ? "Incorrect email or password."
         : result.status === 403
           ? "This account is disabled. Contact your administrator."
-          : "Sign-in is unavailable right now. Try again in a minute.";
+          : `Sign-in failed (status ${result.status}: ${result.error || "unreachable"} — target: ${backendUrl()})`;
     return { error, email };
   }
 
