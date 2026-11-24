@@ -1,5 +1,5 @@
 import "server-only";
-import type { AccessLevel, ActivityEntry, AdminKpi, AppModule, ModuleUsage, User } from "@/data/admin";
+import type { AccessLevel, ActivityEntry, AdminKpi, AppModule, ModuleUsage, RemovedUser, User } from "@/data/admin";
 import { userApi } from "./user-api";
 
 // The Admin page's data, read as the signed-in admin. Nothing falls back to sample data: when the
@@ -14,6 +14,7 @@ const count = (n: number) => n.toLocaleString("en-US");
 export type AdminPageData = {
   kpis: AdminKpi[];
   users: User[];
+  removedUsers: RemovedUser[];
   moduleUsage: ModuleUsage[];
   modules: AppModule[];
   activity: ActivityEntry[];
@@ -48,6 +49,9 @@ const ACTIONS: Record<string, string> = {
   ai_query: "AI query",
   "admin.update_user": "Changed user",
   "admin.update_access": "Changed module access",
+  "admin.create_user": "Added user",
+  "admin.remove_user": "Removed user",
+  "admin.restore_user": "Restored user",
   "profile.update": "Changed own name",
   password_changed: "Changed password",
   password_change_failed: "Failed password change",
@@ -72,6 +76,10 @@ function describe(action: string, details: Row | null): string {
     const parts = Object.keys(after).map((k) => `${k.replace("is_active", "active")}: ${str(before[k])} → ${str(after[k])}`);
     return `${str(details.email)} · ${parts.join(", ")}`;
   }
+  if (action === "admin.create_user") {
+    return `${str(details.email)} · ${str(details.role)}, ${num(details.modules)} modules (${str(details.access_level)})`;
+  }
+  if (action === "admin.remove_user" || action === "admin.restore_user") return str(details.email);
   if (action === "admin.update_access") {
     const after = (details.after ?? {}) as Row;
     const level = str(Object.values(after)[0], "none");
@@ -98,11 +106,13 @@ export function toActivity(raw: unknown): ActivityEntry[] {
 }
 
 export async function loadAdminPage(): Promise<AdminPageData> {
-  const [usage, users, modules, activity] = await Promise.all([
+  const [usage, users, modules, activity, removed] = await Promise.all([
     userApi<Row>("admin/usage-metrics?period=30d"),
     userApi<Row>("admin/users?limit=500"),
     userApi<Row>("admin/modules"),
     userApi<Row>("admin/activity?limit=50"),
+    // Optional: an API from before user removal has no such route; the page still works without it.
+    userApi<Row>("admin/users/removed").catch(() => ({}) as Row),
   ]);
   return {
     kpis: [
@@ -112,6 +122,13 @@ export async function loadAdminPage(): Promise<AdminPageData> {
       { label: "User Accounts", value: count(num(usage.active_accounts)) },
     ],
     users: list(users.data).map(toUser),
+    removedUsers: list(removed.data).map((u) => ({
+      id: str(u.id),
+      name: str(u.name),
+      email: str(u.email),
+      role: str(u.role),
+      removedAt: u.deleted_at ? str(u.deleted_at) : null,
+    })),
     moduleUsage: list(usage.module_usage).map((m) => ({
       module: str(m.module),
       pct: num(m.pct),

@@ -51,7 +51,7 @@ async def _account(user_id: str) -> Optional[dict]:
     if hit and now - hit[0] < _ACCOUNT_TTL_S:
         return hit[1]
     row = await db.query_one(
-        """SELECT u.role, u.is_active,
+        """SELECT u.role, u.is_active, u.deleted_at,
                   COALESCE(jsonb_object_agg(m.slug, ma.access_level) FILTER (WHERE m.slug IS NOT NULL), '{}'::jsonb) AS modules
              FROM users u
              LEFT JOIN module_access ma ON ma.user_id = u.id AND ma.access_level <> 'none'
@@ -131,7 +131,7 @@ async def get_current_user(request: Request) -> AuthUser:
     # A token stays valid for days, so a deactivated account or a changed role is checked here,
     # not only at sign-in.
     account = await _account(str(decoded["id"]))
-    if not account or account["is_active"] is False:
+    if not account or account["is_active"] is False or account["deleted_at"] is not None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account is disabled or removed")
     return AuthUser(id=str(decoded["id"]), email=decoded["email"], role=account["role"])
 

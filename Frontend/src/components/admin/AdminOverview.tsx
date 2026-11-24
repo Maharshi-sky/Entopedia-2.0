@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Pencil, Power, X } from "lucide-react";
+import { Eye, EyeOff, Loader2, Pencil, Power, RotateCcw, Trash2, UserPlus, X } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { CountUp } from "@/components/ui/CountUp";
-import { accessLevels, roles, type AccessLevel, type AppModule, type User } from "@/data/admin";
+import { accessLevels, roles, type AccessLevel, type AppModule, type RemovedUser, type User } from "@/data/admin";
 import type { AdminPageData } from "@/lib/admin-data";
-import { saveUser, setUserActive } from "@/lib/admin-actions";
+import { createUser, removeUser, restoreUser, saveUser, setUserActive } from "@/lib/admin-actions";
 
 // Users, their access and recent activity, all from the database. Edits are saved through the API
 // (which records them in the activity log), then the page reloads its data.
@@ -43,6 +43,196 @@ function When({ iso }: { iso: string | null }) {
   );
 }
 
+const initials = (name: string) =>
+  name
+    .split(" ")
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2);
+
+const cancelButton =
+  "rounded-lg border border-line bg-white px-4 py-2 text-[0.9375rem] font-semibold text-ink transition-colors hover:bg-gray-50";
+const primaryButton =
+  "flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-brand/90 disabled:opacity-70";
+
+/** Overlay, header, scrolling body and footer shared by the Admin page's dialogs. Escape closes it. */
+function Dialog({
+  id,
+  title,
+  subtitle,
+  badge,
+  size = "sm:max-w-xl",
+  onSubmit,
+  onClose,
+  footer,
+  children,
+}: {
+  id: string;
+  title: string;
+  subtitle?: string;
+  badge?: ReactNode;
+  size?: string;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onClose: () => void;
+  footer: ReactNode;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    // Keep the page behind the dialog from scrolling.
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = overflow;
+    };
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+      <div aria-hidden onClick={onClose} className="chart-fade absolute inset-0 bg-black/40" />
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={id}
+        onSubmit={onSubmit}
+        className={`chart-pop relative flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl ${size}`}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
+          <div className="flex items-center gap-3">
+            {badge}
+            <div>
+              <h2 id={id} className="text-lg font-semibold text-ink">
+                {title}
+              </h2>
+              {subtitle && <p className="text-xs text-gray-500">{subtitle}</p>}
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="grid size-9 place-items-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-ink"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">{children}</div>
+        <div className="flex items-center justify-end gap-2 border-t border-line bg-[#fafbfa] px-5 py-3">{footer}</div>
+      </form>
+    </div>
+  );
+}
+
+function ErrorNote({ error }: { error: string | null }) {
+  if (!error) return null;
+  return (
+    <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+      {error}
+    </p>
+  );
+}
+
+function RoleSelect({ id, value, onChange }: { id: string; value: string; onChange: (role: string) => void }) {
+  return (
+    <div>
+      <label htmlFor={id} className={fieldLabel}>
+        Role
+      </label>
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>
+        {roles.map((r) => (
+          <option key={r.value} value={r.value}>
+            {r.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/** Access level radios and the module checklist, used when adding and when editing a user. */
+function AccessFields({
+  modules,
+  access,
+  onAccess,
+  selected,
+  onSelected,
+}: {
+  modules: AppModule[];
+  access: AccessLevel;
+  onAccess: (access: AccessLevel) => void;
+  selected: string[];
+  onSelected: (update: (list: string[]) => string[]) => void;
+}) {
+  const allOn = modules.length > 0 && modules.every((m) => selected.includes(m.slug));
+  return (
+    <>
+      <fieldset>
+        <legend className={fieldLabel}>Access level</legend>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {accessLevels.map(({ value, label, hint }) => {
+            const on = access === value;
+            return (
+              <label
+                key={value}
+                className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 transition-colors ${
+                  on ? "border-brand bg-brand-soft" : "border-line hover:bg-gray-50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="access"
+                  value={value}
+                  checked={on}
+                  onChange={() => onAccess(value)}
+                  className="mt-0.5 size-4 shrink-0 accent-brand"
+                />
+                <span>
+                  <span className="block text-[0.9375rem] font-semibold text-ink">{label}</span>
+                  <span className="block text-[0.8125rem] text-gray-500">{hint}</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <div className="flex items-center justify-between gap-3">
+          <legend className={fieldLabel}>Module access</legend>
+          <button
+            type="button"
+            onClick={() => onSelected(() => (allOn ? [] : modules.map((m) => m.slug)))}
+            className="mb-1.5 text-[0.8125rem] font-semibold text-brand hover:underline"
+          >
+            {allOn ? "Clear all" : "Select all"}
+          </button>
+        </div>
+        <div className="grid grid-cols-1 gap-1 rounded-lg border border-line p-2 sm:grid-cols-2">
+          {modules.map((m) => (
+            <label
+              key={m.slug}
+              className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[0.9375rem] text-ink hover:bg-gray-50"
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(m.slug)}
+                onChange={() => onSelected((l) => (l.includes(m.slug) ? l.filter((x) => x !== m.slug) : [...l, m.slug]))}
+                className="size-4 shrink-0 accent-brand"
+              />
+              {m.name}
+            </label>
+          ))}
+        </div>
+        <p className="mt-1.5 text-[0.8125rem] text-gray-500">
+          {selected.length} of {modules.length} modules.
+        </p>
+      </fieldset>
+    </>
+  );
+}
+
 function EditUserDialog({
   user,
   modules,
@@ -62,20 +252,7 @@ function EditUserDialog({
   const [pending, startTransition] = useTransition();
   const firstField = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    firstField.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    // Keep the page behind the dialog from scrolling.
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = overflow;
-    };
-  }, [onClose]);
-
-  const allOn = modules.length > 0 && modules.every((m) => selected.includes(m.slug));
+  useEffect(() => firstField.current?.focus(), []);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -89,190 +266,323 @@ function EditUserDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
-      <div aria-hidden onClick={onClose} className="chart-fade absolute inset-0 bg-black/40" />
-      <form
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="edit-user-title"
-        onSubmit={handleSubmit}
-        className="chart-pop relative flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-w-xl sm:rounded-2xl"
-      >
-        <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
-          <div className="flex items-center gap-3">
-            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-brand text-[0.9375rem] font-semibold text-white">
-              {user.name
-                .split(" ")
-                .map((p) => p[0])
-                .join("")
-                .slice(0, 2)}
-            </span>
-            <div>
-              <h2 id="edit-user-title" className="text-lg font-semibold text-ink">
-                Edit {user.name}
-              </h2>
-              <p className="text-xs text-gray-500">{user.email}</p>
-            </div>
-          </div>
+    <Dialog
+      id="edit-user-title"
+      title={`Edit ${user.name}`}
+      subtitle={user.email}
+      badge={
+        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-brand text-[0.9375rem] font-semibold text-white">
+          {initials(user.name)}
+        </span>
+      }
+      onSubmit={handleSubmit}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" onClick={onClose} className={cancelButton}>
+            Cancel
+          </button>
+          <button type="submit" disabled={pending} className={primaryButton}>
+            {pending && <Loader2 className="size-4 animate-spin" />}
+            {pending ? "Saving…" : "Save changes"}
+          </button>
+        </>
+      }
+    >
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <label htmlFor="edit-name" className={fieldLabel}>
+            Name
+          </label>
+          <input ref={firstField} id="edit-name" name="name" required defaultValue={user.name} className={inputClass} />
+        </div>
+        <RoleSelect id="edit-role" value={role} onChange={setRole} />
+        <div>
+          <span className={fieldLabel}>Status</span>
           <button
             type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="grid size-9 place-items-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-ink"
+            role="switch"
+            aria-checked={active}
+            onClick={() => setActive((v) => !v)}
+            className="flex w-full items-center justify-between rounded-lg border border-line px-3 py-2.5 text-[0.9375rem] text-ink"
           >
-            <X className="size-4" />
+            {active ? "Active" : "Inactive"}
+            <span className={`relative h-6 w-11 rounded-full transition-colors ${active ? "bg-brand" : "bg-gray-300"}`}>
+              <span
+                className={`absolute top-1 left-1 size-4 rounded-full bg-white shadow transition-transform ${
+                  active ? "translate-x-5" : ""
+                }`}
+              />
+            </span>
           </button>
         </div>
+      </div>
+      <AccessFields modules={modules} access={access} onAccess={setAccess} selected={selected} onSelected={setSelected} />
+      <ErrorNote error={error} />
+    </Dialog>
+  );
+}
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <label htmlFor="edit-name" className={fieldLabel}>
-                Name
-              </label>
-              <input ref={firstField} id="edit-name" name="name" required defaultValue={user.name} className={inputClass} />
-            </div>
-            <div>
-              <label htmlFor="edit-role" className={fieldLabel}>
-                Role
-              </label>
-              <select id="edit-role" value={role} onChange={(e) => setRole(e.target.value)} className={inputClass}>
-                {roles.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <span className={fieldLabel}>Status</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={active}
-                onClick={() => setActive((v) => !v)}
-                className="flex w-full items-center justify-between rounded-lg border border-line px-3 py-2.5 text-[0.9375rem] text-ink"
-              >
-                {active ? "Active" : "Inactive"}
-                <span className={`relative h-6 w-11 rounded-full transition-colors ${active ? "bg-brand" : "bg-gray-300"}`}>
-                  <span
-                    className={`absolute top-1 left-1 size-4 rounded-full bg-white shadow transition-transform ${
-                      active ? "translate-x-5" : ""
-                    }`}
-                  />
-                </span>
-              </button>
-            </div>
-          </div>
+/** A 16-character password from an alphabet without look-alikes (0/O, 1/l/I), for the admin to pass on. */
+function generatePassword(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%&*";
+  const bytes = crypto.getRandomValues(new Uint32Array(16));
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
+}
 
-          <fieldset>
-            <legend className={fieldLabel}>Access level</legend>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              {accessLevels.map(({ value, label, hint }) => {
-                const on = access === value;
-                return (
-                  <label
-                    key={value}
-                    className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 transition-colors ${
-                      on ? "border-brand bg-brand-soft" : "border-line hover:bg-gray-50"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="access"
-                      value={value}
-                      checked={on}
-                      onChange={() => setAccess(value)}
-                      className="mt-0.5 size-4 shrink-0 accent-brand"
-                    />
-                    <span>
-                      <span className="block text-[0.9375rem] font-semibold text-ink">{label}</span>
-                      <span className="block text-[0.8125rem] text-gray-500">{hint}</span>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          </fieldset>
+function AddUserDialog({
+  modules,
+  onSaved,
+  onClose,
+}: {
+  modules: AppModule[];
+  onSaved: (name: string, email: string) => void;
+  onClose: () => void;
+}) {
+  const [role, setRole] = useState<string>("marketing");
+  const [access, setAccess] = useState<AccessLevel>("standard");
+  const [selected, setSelected] = useState<string[]>([]);
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const firstField = useRef<HTMLInputElement>(null);
 
-          <fieldset>
-            <div className="flex items-center justify-between gap-3">
-              <legend className={fieldLabel}>Module access</legend>
-              <button
-                type="button"
-                onClick={() => setSelected(allOn ? [] : modules.map((m) => m.slug))}
-                className="mb-1.5 text-[0.8125rem] font-semibold text-brand hover:underline"
-              >
-                {allOn ? "Clear all" : "Select all"}
-              </button>
-            </div>
-            <div className="grid grid-cols-1 gap-1 rounded-lg border border-line p-2 sm:grid-cols-2">
-              {modules.map((m) => (
-                <label
-                  key={m.slug}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[0.9375rem] text-ink hover:bg-gray-50"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(m.slug)}
-                    onChange={() =>
-                      setSelected((l) => (l.includes(m.slug) ? l.filter((x) => x !== m.slug) : [...l, m.slug]))
-                    }
-                    className="size-4 shrink-0 accent-brand"
-                  />
-                  {m.name}
-                </label>
-              ))}
-            </div>
-            <p className="mt-1.5 text-[0.8125rem] text-gray-500">
-              {selected.length} of {modules.length} modules.
-            </p>
-          </fieldset>
+  useEffect(() => firstField.current?.focus(), []);
 
-          {error && (
-            <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {error}
-            </p>
-          )}
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("name") ?? "").trim();
+    const email = String(form.get("email") ?? "").trim();
+    setError(null);
+    startTransition(async () => {
+      const result = await createUser({ name, email, password, role, access, modules: selected });
+      if (result.ok) onSaved(name, email);
+      else setError(result.error);
+    });
+  }
+
+  return (
+    <Dialog
+      id="add-user-title"
+      title="Add user"
+      subtitle="They sign in with this email and password, and can change the password in Settings."
+      badge={
+        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-brand-soft text-brand">
+          <UserPlus className="size-5" strokeWidth={1.75} />
+        </span>
+      }
+      onSubmit={handleSubmit}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" onClick={onClose} className={cancelButton}>
+            Cancel
+          </button>
+          <button type="submit" disabled={pending} className={primaryButton}>
+            {pending && <Loader2 className="size-4 animate-spin" />}
+            {pending ? "Adding…" : "Add user"}
+          </button>
+        </>
+      }
+    >
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div>
+          <label htmlFor="add-name" className={fieldLabel}>
+            Name
+          </label>
+          <input ref={firstField} id="add-name" name="name" required maxLength={255} className={inputClass} />
         </div>
+        <div>
+          <label htmlFor="add-email" className={fieldLabel}>
+            Email
+          </label>
+          <input id="add-email" name="email" type="email" required maxLength={255} autoComplete="off" className={inputClass} />
+        </div>
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <label htmlFor="add-password" className={fieldLabel}>
+              Password
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setPassword(generatePassword());
+                setShowPassword(true);
+              }}
+              className="mb-1.5 text-[0.8125rem] font-semibold text-brand hover:underline"
+            >
+              Generate
+            </button>
+          </div>
+          <div className="relative">
+            <input
+              id="add-password"
+              type={showPassword ? "text" : "password"}
+              required
+              minLength={10}
+              maxLength={72}
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className={`${inputClass} pr-10 font-mono`}
+            />
+            <button
+              type="button"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              onClick={() => setShowPassword((v) => !v)}
+              className="absolute top-1/2 right-2 grid size-7 -translate-y-1/2 place-items-center rounded text-gray-400 hover:text-ink"
+            >
+              {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </div>
+          <p className="mt-1 text-[0.8125rem] text-gray-500">At least 10 characters. Share it with the user yourself.</p>
+        </div>
+        <RoleSelect id="add-role" value={role} onChange={setRole} />
+      </div>
+      <AccessFields modules={modules} access={access} onAccess={setAccess} selected={selected} onSelected={setSelected} />
+      <ErrorNote error={error} />
+    </Dialog>
+  );
+}
 
-        <div className="flex items-center justify-end gap-2 border-t border-line bg-[#fafbfa] px-5 py-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-line bg-white px-4 py-2 text-[0.9375rem] font-semibold text-ink transition-colors hover:bg-gray-50"
-          >
+function RemoveUserDialog({ user, onDone, onClose }: { user: User; onDone: () => void; onClose: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    startTransition(async () => {
+      const result = await removeUser(user.id);
+      if (result.ok) onDone();
+      else setError(result.error);
+    });
+  }
+
+  return (
+    <Dialog
+      id="remove-user-title"
+      title={`Remove ${user.name}?`}
+      subtitle={user.email}
+      size="sm:max-w-md"
+      onSubmit={handleSubmit}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" onClick={onClose} className={cancelButton}>
             Cancel
           </button>
           <button
             type="submit"
             disabled={pending}
-            className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-brand/90 disabled:opacity-70"
+            className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-70"
           >
-            {pending && <Loader2 className="size-4 animate-spin" />}
-            {pending ? "Saving…" : "Save changes"}
+            {pending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+            {pending ? "Removing…" : "Remove user"}
           </button>
-        </div>
-      </form>
-    </div>
+        </>
+      }
+    >
+      <p className="text-[0.9375rem] text-gray-600">
+        They will be signed out and can&apos;t sign in, and they leave the user list. Their history and data are kept,
+        and you can restore them from <span className="font-semibold text-ink">Removed users</span> below.
+      </p>
+      <ErrorNote error={error} />
+    </Dialog>
+  );
+}
+
+function RemovedUsers({
+  users,
+  busy,
+  onRestore,
+}: {
+  users: RemovedUser[];
+  busy: string | null;
+  onRestore: (user: RemovedUser) => void;
+}) {
+  if (users.length === 0) return null;
+  return (
+    <Card flush className="overflow-hidden">
+      <details>
+        <summary className="cursor-pointer px-4 py-3 select-none">
+          <span className={sectionLabel}>Removed users ({users.length})</span>
+          <span className="mt-1 block text-xs text-gray-500">Can&apos;t sign in. Restore brings them back with their old access.</span>
+        </summary>
+        <ul className="divide-y divide-line border-t border-line">
+          {users.map((u) => (
+            <li key={u.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-[0.9375rem]">
+              <div className="min-w-0">
+                <span className="font-semibold text-ink">{u.name}</span>
+                <span className="block truncate text-[0.8125rem] text-gray-500">
+                  {u.email} · {roleLabel(u.role)} · removed <When iso={u.removedAt} />
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRestore(u)}
+                disabled={busy === u.id}
+                className="flex items-center gap-1.5 rounded-lg border border-line bg-white px-3 py-1.5 text-[0.875rem] font-semibold text-ink transition-colors hover:bg-gray-50 disabled:opacity-60"
+              >
+                {busy === u.id ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
+                Restore
+              </button>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </Card>
   );
 }
 
 export function AdminOverview({ data }: { data: AdminPageData }) {
-  const { kpis, users, moduleUsage, modules, activity } = data;
+  const { kpis, users, removedUsers, moduleUsage, modules, activity } = data;
   const router = useRouter();
   const [editing, setEditing] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const editingUser = users.find((u) => u.id === editing);
-  // Stable, so the dialog's focus/scroll-lock effect only runs when it opens.
+  const removingUser = users.find((u) => u.id === removing);
+  // Stable, so each dialog's scroll-lock effect only runs when it opens.
   const closeEdit = useCallback(() => setEditing(null), []);
+  const closeRemove = useCallback(() => setRemoving(null), []);
+  const closeAdd = useCallback(() => setAdding(false), []);
 
   function saved(name: string) {
     setEditing(null);
     setNotice({ tone: "ok", text: `Saved ${name}. The change is in the activity list below.` });
     router.refresh();
+  }
+
+  function added(name: string, email: string) {
+    setAdding(false);
+    setNotice({ tone: "ok", text: `Added ${name}. They can sign in as ${email} with the password you set.` });
+    router.refresh();
+  }
+
+  function removed(user: User) {
+    setRemoving(null);
+    setNotice({ tone: "ok", text: `Removed ${user.name}. You can restore them from Removed users below.` });
+    router.refresh();
+  }
+
+  function restore(user: RemovedUser) {
+    setBusy(user.id);
+    startTransition(async () => {
+      const result = await restoreUser(user.id);
+      setBusy(null);
+      if (result.ok) {
+        setNotice({ tone: "ok", text: `Restored ${user.name}. They can sign in again.` });
+        router.refresh();
+      } else {
+        setNotice({ tone: "error", text: result.error });
+      }
+    });
   }
 
   function toggleActive(user: User) {
@@ -318,6 +628,16 @@ export function AdminOverview({ data }: { data: AdminPageData }) {
       )}
 
       <div className="overflow-hidden rounded-xl border border-line bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+          <div>
+            <h2 className={sectionLabel}>Users ({users.length})</h2>
+            <p className="mt-1 text-xs text-gray-500">Add people, set their role and modules, or remove them.</p>
+          </div>
+          <button type="button" onClick={() => setAdding(true)} className={primaryButton}>
+            <UserPlus className="size-4" strokeWidth={2} />
+            Add user
+          </button>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[60rem] text-[0.9375rem]">
             <thead className="bg-[#E5E8E3]">
@@ -387,6 +707,15 @@ export function AdminOverview({ data }: { data: AdminPageData }) {
                       >
                         {busy === u.id ? <Loader2 className="size-4 animate-spin" /> : <Power className="size-4" strokeWidth={1.75} />}
                       </button>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${u.name}`}
+                        title="Remove user (can be restored)"
+                        onClick={() => setRemoving(u.id)}
+                        className={`${iconButton} hover:text-red-600`}
+                      >
+                        <Trash2 className="size-4" strokeWidth={1.75} />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -395,6 +724,8 @@ export function AdminOverview({ data }: { data: AdminPageData }) {
           </table>
         </div>
       </div>
+
+      <RemovedUsers users={removedUsers} busy={busy} onRestore={restore} />
 
       <Card>
         <h2 className={sectionLabel}>Module Usage (30d)</h2>
@@ -490,6 +821,10 @@ export function AdminOverview({ data }: { data: AdminPageData }) {
           onClose={closeEdit}
         />
       )}
+      {removingUser && (
+        <RemoveUserDialog key={removingUser.id} user={removingUser} onDone={() => removed(removingUser)} onClose={closeRemove} />
+      )}
+      {adding && <AddUserDialog modules={modules} onSaved={added} onClose={closeAdd} />}
     </>
   );
 }

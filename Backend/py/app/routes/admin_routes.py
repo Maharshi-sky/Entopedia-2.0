@@ -3,7 +3,14 @@ Admin: users, their module access, and what they have been doing. Admins only.
 
 Every change an admin makes is written to user_activity_log (action 'admin.*') with the values
 before and after, so the Admin page's activity list shows who changed what.
+
+Removing a user is a soft delete: the row keeps everything, with deleted_at set and is_active false,
+so the user can't sign in and is left out of the user list until an admin restores them.
 """
+import re
+import uuid
+
+import bcrypt
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
 from app.db.connection import db
@@ -16,24 +23,47 @@ router = APIRouter(dependencies=[Depends(require_roles("admin"))])
 
 ROLES = ("admin", "marketing", "regulatory_specialist")
 ACCESS_LEVELS = ("full", "standard", "read")
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _clamp(value: int, low: int, high: int) -> int:
     return max(low, min(high, value))
 
 
-async def _user_row(user_id: str) -> dict:
-    row = await db.query_one("SELECT id, email, name, role, is_active FROM users WHERE id::text = $1", [user_id])
-    if not row:
-        raise HTTPException(status_code=404, detail="User not found")
+async def _user_row(user_id: str, *, removed: bool = False) -> dict:
+    """The user, or a 404. Removed users are found only with removed=True (and then only they are)."""
+    row = await db.query_one(
+        "SELECT id, email, name, role, is_active, deleted_at FROM users WHERE id::text = $1", [user_id]
+    )
+    if not row or (row["deleted_at"] is not None) != removed:
+        raise HTTPException(status_code=404, detail="Removed user not found" if removed else "User not found")
     return row
 
 
 async def _other_active_admins(user_id: str) -> int:
     row = await db.query_one(
-        "SELECT COUNT(*)::int AS n FROM users WHERE role = 'admin' AND is_active AND id::text <> $1", [user_id]
+        """SELECT COUNT(*)::int AS n FROM users
+            WHERE role = 'admin' AND is_active AND deleted_at IS NULL AND id::text <> $1""",
+        [user_id],
     )
     return row["n"] if row else 0
+
+
+def _modules_and_level(body: dict) -> tuple[list[str], str]:
+    slugs = body.get("modules", [])
+    level = body.get("access_level", "standard")
+    if not isinstance(slugs, list) or not all(isinstance(s, str) for s in slugs):
+        raise HTTPException(status_code=400, detail="modules must be a list of module slugs")
+    if level not in ACCESS_LEVELS:
+        raise HTTPException(status_code=400, detail=f"access_level must be one of {', '.join(ACCESS_LEVELS)}")
+    return sorted(set(slugs)), level
+
+
+async def _check_known_modules(slugs: list[str]) -> None:
+    known = {r["slug"] for r in await db.query_many("SELECT slug FROM modules")}
+    unknown = sorted(set(slugs) - known)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown modules: {', '.join(unknown)}")
 
 
 @router.get("/users")
@@ -54,16 +84,139 @@ async def list_users(limit: int = 50, offset: int = 0):
                  FROM users u
                  LEFT JOIN module_access ma ON ma.user_id = u.id AND ma.access_level <> 'none'
                  LEFT JOIN modules m ON m.id = ma.module_id
+                WHERE u.deleted_at IS NULL
                 GROUP BY u.id
                 ORDER BY u.created_at ASC
                 LIMIT $1 OFFSET $2""",
             [limit, offset],
         )
-        total = await db.query_one("SELECT COUNT(*)::int AS count FROM users")
+        total = await db.query_one("SELECT COUNT(*)::int AS count FROM users WHERE deleted_at IS NULL")
         return {"data": users, "pagination": {"limit": limit, "offset": offset, "total": total["count"] if total else 0}}
     except Exception as error:  # noqa: BLE001
         logger.error(f"Users list error: {error}")
         raise HTTPException(status_code=500, detail="Failed to fetch users")
+
+
+@router.get("/users/removed")
+async def list_removed_users():
+    """Removed users, most recently removed first, for the Admin page's restore list."""
+    try:
+        users = await db.query_many(
+            """SELECT id, email, name, role, deleted_at FROM users
+                WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT 500"""
+        )
+        return {"data": users}
+    except Exception as error:  # noqa: BLE001
+        logger.error(f"Removed users list error: {error}")
+        raise HTTPException(status_code=500, detail="Failed to fetch removed users")
+
+
+@router.post("/users", status_code=201)
+async def create_user(request: Request, body: dict = Body(...), admin: AuthUser = Depends(require_roles("admin"))):
+    """Adds a user with a password the admin chose (the user can change it in Settings), a role,
+    and access to `modules` at `access_level`."""
+    email = str(body.get("email") or "").strip().lower()
+    name = str(body.get("name") or "").strip()
+    password = body.get("password")
+    role = body.get("role", "marketing")
+
+    if not _EMAIL.match(email) or len(email) > 255:
+        raise HTTPException(status_code=400, detail="Enter a valid email address")
+    if not name or len(name) > 255:
+        raise HTTPException(status_code=400, detail="Name must be 1 to 255 characters")
+    # Same rule as changing your own password in Settings; bcrypt reads at most 72 bytes.
+    if not isinstance(password, str) or len(password) < 10 or len(password.encode()) > 72:
+        raise HTTPException(status_code=400, detail="The password needs 10 to 72 characters")
+    if role not in ROLES:
+        raise HTTPException(status_code=400, detail=f"Role must be one of {', '.join(ROLES)}")
+    slugs, level = _modules_and_level(body)
+    await _check_known_modules(slugs)
+
+    existing = await db.query_one("SELECT deleted_at FROM users WHERE LOWER(email) = $1", [email])
+    if existing:
+        detail = (
+            "This email belongs to a removed user. Restore them from Removed users instead."
+            if existing["deleted_at"] is not None
+            else "A user with this email already exists"
+        )
+        raise HTTPException(status_code=409, detail=detail)
+
+    user_id = str(uuid.uuid4())
+    password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(10)).decode()
+    try:
+        pool = db.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    """INSERT INTO users (id, email, name, password_hash, role, is_active, created_at, updated_at)
+                       VALUES ($1::uuid, $2, $3, $4, $5, TRUE, NOW(), NOW())""",
+                    user_id, email, name, password_hash, role,
+                )
+                if slugs:
+                    await conn.execute(
+                        """INSERT INTO module_access (user_id, module_id, access_level)
+                           SELECT $1::uuid, id, $3 FROM modules WHERE slug = ANY($2::text[])""",
+                        user_id, slugs, level,
+                    )
+    except Exception as error:  # noqa: BLE001
+        logger.error(f"User create error: {error}")
+        raise HTTPException(status_code=500, detail="Failed to add user")
+
+    await log_activity(
+        admin.id, "admin.create_user", resource_type="user", resource_id=user_id,
+        details={"email": email, "name": name, "role": role, "modules": len(slugs), "access_level": level},
+        request=request,
+    )
+    return {"user": {"id": user_id, "email": email, "name": name, "role": role, "is_active": True}}
+
+
+@router.delete("/users/{user_id}")
+async def remove_user(user_id: str, request: Request, admin: AuthUser = Depends(require_roles("admin"))):
+    """Soft-deletes the user: they can't sign in and leave the user list; nothing is erased."""
+    target = await _user_row(user_id)
+    if str(target["id"]) == admin.id:
+        raise HTTPException(status_code=400, detail="You can't remove yourself")
+    if target["role"] == "admin" and target["is_active"] and await _other_active_admins(user_id) == 0:
+        raise HTTPException(status_code=400, detail="At least one active admin must remain")
+    try:
+        await db.execute(
+            "UPDATE users SET deleted_at = NOW(), is_active = FALSE, updated_at = NOW() WHERE id::text = $1",
+            [user_id],
+        )
+    except Exception as error:  # noqa: BLE001
+        logger.error(f"User remove error: {error}")
+        raise HTTPException(status_code=500, detail="Failed to remove user")
+
+    forget_account(user_id)
+    await log_activity(
+        admin.id, "admin.remove_user", resource_type="user", resource_id=user_id,
+        details={"email": target["email"], "name": target["name"], "was_active": target["is_active"]},
+        request=request,
+    )
+    return {"removed": True}
+
+
+@router.post("/users/{user_id}/restore")
+async def restore_user(user_id: str, request: Request, admin: AuthUser = Depends(require_roles("admin"))):
+    """Brings a removed user back, active, with the role and module access they had."""
+    target = await _user_row(user_id, removed=True)
+    try:
+        after = await db.query_one(
+            """UPDATE users SET deleted_at = NULL, is_active = TRUE, updated_at = NOW() WHERE id::text = $1
+               RETURNING id, email, name, role, is_active""",
+            [user_id],
+        )
+    except Exception as error:  # noqa: BLE001
+        logger.error(f"User restore error: {error}")
+        raise HTTPException(status_code=500, detail="Failed to restore user")
+
+    forget_account(user_id)
+    await log_activity(
+        admin.id, "admin.restore_user", resource_type="user", resource_id=user_id,
+        details={"email": target["email"], "name": target["name"]},
+        request=request,
+    )
+    return {"user": after}
 
 
 @router.patch("/users/{user_id}")
@@ -131,10 +284,7 @@ async def set_modules(user_id: str, request: Request, body: dict = Body(...), ad
     if level not in ACCESS_LEVELS:
         raise HTTPException(status_code=400, detail=f"access_level must be one of {', '.join(ACCESS_LEVELS)}")
 
-    known = {r["slug"]: r["id"] for r in await db.query_many("SELECT id, slug FROM modules")}
-    unknown = sorted(set(slugs) - set(known))
-    if unknown:
-        raise HTTPException(status_code=400, detail=f"Unknown modules: {', '.join(unknown)}")
+    await _check_known_modules(slugs)
 
     before = await db.query_many(
         """SELECT m.slug, ma.access_level FROM module_access ma JOIN modules m ON m.id = ma.module_id
@@ -261,7 +411,7 @@ async def usage_metrics(period: str = "30d"):
             [interval],
         )
         totals = await db.query_one(
-            "SELECT (SELECT COUNT(*)::int FROM users WHERE is_active) AS active_accounts, (SELECT COUNT(*)::int FROM modules) AS modules_total"
+            "SELECT (SELECT COUNT(*)::int FROM users WHERE is_active AND deleted_at IS NULL) AS active_accounts, (SELECT COUNT(*)::int FROM modules) AS modules_total"
         )
         active_users = active["count"] if active else 0
         return {

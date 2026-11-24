@@ -81,8 +81,13 @@ async def login(body: LoginBody, request: Request):
 
     try:
         user = await db.query_one(
-            "SELECT id, email, name, password_hash, role, is_active FROM users WHERE email = $1", [body.email]
+            "SELECT id, email, name, password_hash, role, is_active, deleted_at FROM users WHERE email = $1", [body.email]
         )
+
+        if user and user["deleted_at"] is not None:
+            # A removed account answers like an unknown email, so sign-in doesn't reveal that it existed.
+            await log_activity(user["id"], "login_failed", details={"email": user["email"], "reason": "removed account"}, request=request)
+            raise HTTPException(status_code=401, detail="Invalid credentials")
 
         if not user or not _password_matches(body.password, user["password_hash"]):
             # Unknown emails are logged without a user (the email is in details).

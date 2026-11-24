@@ -33,6 +33,9 @@ export type User = {
   lastActive: string | null;
 };
 
+/** GET /admin/users/removed: removed (soft-deleted) users an admin can restore. */
+export type RemovedUser = { id: string; name: string; email: string; role: Role | string; removedAt: string | null };
+
 /** GET /admin/usage-metrics */
 export type AdminKpi = { label: string; value: string; suffix?: string };
 export type ModuleUsage = { module: string; pct: number; users: number; visits: number };
