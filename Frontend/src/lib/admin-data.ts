@@ -21,8 +21,8 @@ export type AdminPageData = {
 };
 
 function toAccess(levels: string[]): AccessLevel | null {
-  if (levels.includes("full")) return "full";
-  if (levels.includes("standard")) return "standard";
+  // "standard" was merged into "full"; older rows may still carry it.
+  if (levels.includes("full") || levels.includes("standard")) return "full";
   if (levels.includes("read")) return "read";
   return null;
 }

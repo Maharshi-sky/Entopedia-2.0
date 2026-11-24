@@ -1,5 +1,5 @@
 """
-A news refresh: search Google News for every brand, sort the headlines (local Ollama model, or keyword
+A news refresh: search Google News for every brand, sort the headlines (Groq model, or keyword
 matching), look up links and pictures, save. Port of news_scraper.run + main.py's refresh endpoint.
 
 Only one refresh runs at a time, across the API server, the schedule and the command line: the running

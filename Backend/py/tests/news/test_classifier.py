@@ -33,7 +33,7 @@ class TestAiSort:
     @pytest.mark.asyncio
     async def test_applies_verdicts_by_number_and_asks_for_json_schema(self, mocker):
         chat = mocker.patch(
-            "app.news.classifier.ollama_service.chat_json",
+            "app.news.classifier.groq_service.chat_json",
             return_value={
                 "items": [
                     {"i": 0, "relevance": "brand", "category": "product launch"},
@@ -59,7 +59,7 @@ class TestAiSort:
     async def test_sends_headlines_in_batches(self, mocker):
         os.environ["NEWS_AI_BATCH_SIZE"] = "2"
         try:
-            chat = mocker.patch("app.news.classifier.ollama_service.chat_json", return_value={"items": []})
+            chat = mocker.patch("app.news.classifier.groq_service.chat_json", return_value={"items": []})
             await ai_sort(BRAND, [_story("a"), _story("b"), _story("c")])
             assert chat.call_count == 2
         finally:
@@ -67,7 +67,7 @@ class TestAiSort:
 
     @pytest.mark.asyncio
     async def test_reports_a_failed_batch_so_caller_sorts_by_keyword(self, mocker):
-        mocker.patch("app.news.classifier.ollama_service.chat_json", side_effect=RuntimeError("timeout"))
+        mocker.patch("app.news.classifier.groq_service.chat_json", side_effect=RuntimeError("timeout"))
         items = [_story("All Out launches refill")]
         assert await ai_sort(BRAND, items) is False
         assert items[0].relevance is None
@@ -75,35 +75,17 @@ class TestAiSort:
 
 class TestAiAvailable:
     @pytest.mark.asyncio
-    async def test_off_when_ollama_not_running(self, mocker):
-        mocker.patch(
-            "app.news.classifier.ollama_service.get_status",
-            return_value={"available": False, "host": "http://localhost:11434", "defaultModel": "qwen2.5:7b", "models": []},
-        )
+    async def test_off_without_a_groq_key(self, monkeypatch):
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
         result = await ai_available()
         assert result["ok"] is False
-        assert result["reason"] == "Ollama not reachable at http://localhost:11434"
+        assert result["reason"] == "GROQ_API_KEY is not set"
 
     @pytest.mark.asyncio
-    async def test_off_when_model_not_pulled(self, mocker):
-        os.environ["OLLAMA_NEWS_MODEL"] = "qwen2.5:7b"
-        try:
-            mocker.patch(
-                "app.news.classifier.ollama_service.get_status",
-                return_value={"available": True, "host": "h", "defaultModel": "x", "models": ["moondream:latest", "qwen2.5:3b"]},
-            )
-            result = await ai_available()
-            assert result["ok"] is False
-        finally:
-            del os.environ["OLLAMA_NEWS_MODEL"]
-
-    @pytest.mark.asyncio
-    async def test_on_when_model_is_installed(self, mocker):
-        mocker.patch(
-            "app.news.classifier.ollama_service.get_status",
-            return_value={"available": True, "host": "h", "defaultModel": "x", "models": ["qwen2.5:7b", "moondream:latest"]},
-        )
-        assert await ai_available() == {"ok": True, "model": "qwen2.5:7b"}
+    async def test_on_with_a_key_and_uses_the_news_model(self, monkeypatch):
+        monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+        monkeypatch.setenv("GROQ_NEWS_MODEL", "openai/gpt-oss-20b")
+        assert await ai_available() == {"ok": True, "model": "openai/gpt-oss-20b"}
 
 
 @pytest.mark.parametrize(

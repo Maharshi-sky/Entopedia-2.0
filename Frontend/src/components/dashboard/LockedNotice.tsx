@@ -53,7 +53,7 @@ export function LockedNotice() {
       </h1>
       <p className="mt-2 text-sm text-gray-500">
         {unavailable
-          ? "The Entopedia API was too busy to confirm your access (this can happen while the local AI is working)."
+          ? "The Entopedia API was too busy to confirm your access."
           : "Ask an administrator to give you access on the Admin page."}
       </p>
       {unavailable ? (

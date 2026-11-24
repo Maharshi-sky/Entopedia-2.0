@@ -5,7 +5,7 @@ News from the command line (the Python version's news_scraper.py and images.py):
   python -m app.news.cli refresh --brand "Mortein"                  one brand from news_brands
   python -m app.news.cli refresh --brand "Baygon | Bayer's insect spray brand | spray"   a brand not in the table
   python -m app.news.cli refresh --days 7 --country US              IN, US, UK, AU, SA, DE
-  python -m app.news.cli refresh --no-ai                            keyword sorting only (no Ollama)
+  python -m app.news.cli refresh --no-ai                            keyword sorting only (no AI)
   python -m app.news.cli refresh --no-images                        skip looking up article pictures
   python -m app.news.cli images                                     pictures for stories not checked yet
   python -m app.news.cli images --retry-blocked                     also try again the sites that refused (via Zyte when set)

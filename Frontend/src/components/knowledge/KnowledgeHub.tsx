@@ -16,7 +16,7 @@ import {
 } from "@/data/knowledge";
 
 // Files are uploaded to the API, which extracts their text and indexes it; "Ask" answers from
-// that text with the local AI and cites the file and page of every excerpt it used.
+// that text with the AI (Groq) and cites the file and page of every excerpt it used.
 
 const tabs = ["Upload Intelligence", "Saved Assets", "Ask Knowledge Hub"] as const;
 type Tab = (typeof tabs)[number];

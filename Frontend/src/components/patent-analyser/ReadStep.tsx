@@ -120,7 +120,7 @@ export function ReadStep({
             <p role="status" className="text-xs text-gray-600">
               {run.status ??
                 `${sheet.rows.length} records loaded · ${readCount} read` +
-                  (next.length ? ` · next ${next.length} will be read via the local model.` : ".")}
+                  (next.length ? ` · next ${next.length} will be read via the AI model.` : ".")}
             </p>
           </div>
 

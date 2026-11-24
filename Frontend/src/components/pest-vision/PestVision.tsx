@@ -120,7 +120,7 @@ function errorText(error: unknown) {
   try {
     return (JSON.parse(raw) as { error?: string }).error ?? "Identification failed.";
   } catch {
-    return raw || "Identification failed. Check that the API and Ollama are running.";
+    return raw || "Identification failed. Check that the API is running and try again.";
   }
 }
 

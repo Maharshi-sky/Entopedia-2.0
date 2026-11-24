@@ -67,7 +67,7 @@ REDIS_PASSWORD=<redis-password>
 
 # API Keys
 JWT_SECRET=<generate-with-openssl-rand-hex-32>
-ANTHROPIC_API_KEY=<your-api-key>
+GROQ_API_KEY=<your-groq-api-key>
 
 # URLs
 CORS_ORIGIN=https://entopedia.reckitt.com

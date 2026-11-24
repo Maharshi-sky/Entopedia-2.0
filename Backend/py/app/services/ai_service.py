@@ -11,7 +11,7 @@ from app.db.redis_client import redis
 from app.services import llm
 from app.utils.logger import logger
 
-# Text comes from the provider in AI_PROVIDER (default: local Ollama); see app/services/llm.py.
+# Text comes from Groq; see app/services/llm.py.
 
 
 @dataclass

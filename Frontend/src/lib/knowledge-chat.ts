@@ -78,7 +78,7 @@ function errorText(error: unknown, fallback: string) {
 
 const PENDING: ChatMessage = {
   role: "assistant",
-  text: "Reading the documents… the local AI can take a minute or two. You can switch chats or modules; the answer will be saved in this chat.",
+  text: "Reading the documents… this can take a minute. You can switch chats or modules; the answer will be saved in this chat.",
   pending: true,
 };
 

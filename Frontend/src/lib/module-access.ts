@@ -6,7 +6,7 @@ import type { ModuleAccess } from "./modules";
 //
 //  - A fresh answer is reused for FRESH_MS, so an admin's change reaches the user within that time.
 //  - Several checks at once (page, sidebar, visit tracking) share one request.
-//  - If the API is slow or down (e.g. the local AI is using the whole CPU), the last known answer for
+//  - If the API is slow or down (e.g. a cold start), the last known answer for
 //    this session is used instead of locking the page. Only a session never checked is locked.
 //  - If the API says the session is no longer valid (401/403), nothing cached is used.
 

@@ -10,8 +10,7 @@ export type Role = (typeof roles)[number]["value"];
 
 // module_access.access_level values, and how the page names them.
 export const accessLevels = [
-  { value: "full", label: "Full", hint: "Use the ticked modules, including generating and exporting." },
-  { value: "standard", label: "Standard", hint: "Use the ticked modules; no admin settings." },
+  { value: "full", label: "Full", hint: "Use the ticked modules: view, edit and generate." },
   { value: "read", label: "Read-only", hint: "View the ticked modules; can't edit, generate or export." },
 ] as const;
 export type AccessLevel = (typeof accessLevels)[number]["value"];

@@ -170,7 +170,7 @@ function AccessFields({
     <>
       <fieldset>
         <legend className={fieldLabel}>Access level</legend>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {accessLevels.map(({ value, label, hint }) => {
             const on = access === value;
             return (
@@ -245,7 +245,7 @@ function EditUserDialog({
   onClose: () => void;
 }) {
   const [role, setRole] = useState(user.role);
-  const [access, setAccess] = useState<AccessLevel>(user.access ?? "standard");
+  const [access, setAccess] = useState<AccessLevel>(user.access ?? "full");
   const [selected, setSelected] = useState<string[]>(user.modules);
   const [active, setActive] = useState(user.active);
   const [error, setError] = useState<string | null>(null);
@@ -340,7 +340,7 @@ function AddUserDialog({
   onClose: () => void;
 }) {
   const [role, setRole] = useState<string>("marketing");
-  const [access, setAccess] = useState<AccessLevel>("standard");
+  const [access, setAccess] = useState<AccessLevel>("full");
   const [selected, setSelected] = useState<string[]>([]);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);

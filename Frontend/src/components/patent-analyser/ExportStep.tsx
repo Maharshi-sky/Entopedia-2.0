@@ -218,7 +218,7 @@ export function ExportStep({
         </summary>
         <div className="mt-2 space-y-1.5 text-xs text-gray-600">
           <p>
-            The analyser parses sheets locally in the browser, sends batches through the backend to the AI model it is set to use (AI_PROVIDER: the local Ollama model by default) for reading and synthesis, and upserts enriched records into Supabase when you click &ldquo;Save to Entopedia&rdquo;.
+            The analyser parses sheets locally in the browser, sends batches through the backend to the AI model (Groq, set in the backend) for reading and synthesis, and upserts enriched records into Supabase when you click &ldquo;Save to Entopedia&rdquo;.
           </p>
         </div>
       </details>

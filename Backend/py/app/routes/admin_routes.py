@@ -22,7 +22,7 @@ from app.utils.range import to_interval
 router = APIRouter(dependencies=[Depends(require_roles("admin"))])
 
 ROLES = ("admin", "marketing", "regulatory_specialist")
-ACCESS_LEVELS = ("full", "standard", "read")
+ACCESS_LEVELS = ("full", "read")
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -51,7 +51,7 @@ async def _other_active_admins(user_id: str) -> int:
 
 def _modules_and_level(body: dict) -> tuple[list[str], str]:
     slugs = body.get("modules", [])
-    level = body.get("access_level", "standard")
+    level = body.get("access_level", "full")
     if not isinstance(slugs, list) or not all(isinstance(s, str) for s in slugs):
         raise HTTPException(status_code=400, detail="modules must be a list of module slugs")
     if level not in ACCESS_LEVELS:
@@ -274,7 +274,7 @@ async def update_user(user_id: str, request: Request, body: dict = Body(...), ad
 
 @router.put("/users/{user_id}/modules")
 async def set_modules(user_id: str, request: Request, body: dict = Body(...), admin: AuthUser = Depends(require_roles("admin"))):
-    """Replaces the user's module access: `modules` (slugs) at `access_level` (full | standard | read).
+    """Replaces the user's module access: `modules` (slugs) at `access_level` (full | read).
     Modules left out lose access."""
     target = await _user_row(user_id)
     slugs = body.get("modules")

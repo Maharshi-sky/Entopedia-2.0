@@ -1,7 +1,7 @@
 # Brand news
 
 Finds recent news for each tracked brand on Google News, keeps the stories that are really about the brand
-(sorted by a local Ollama model), adds each article's publisher link and picture, and saves them in the
+(sorted by a Groq model), adds each article's publisher link and picture, and saves them in the
 `news` table. The News page, the dashboard's Recent News and news chart, saved news and the newsletter all
 read from that table.
 
@@ -11,7 +11,7 @@ logic is the same; three things changed:
 | Python version | This version | Why |
 | --- | --- | --- |
 | MongoDB `Entopedia.news` | Postgres `news` table (+ `news_brands`, `news_refresh_runs`, `news_story_verdicts`) | One database; the dashboard, saved news and newsletter see the stories |
-| OpenAI `gpt-4o-mini` | Local Ollama, `qwen2.5:7b` by default | No API cost; same prompt, JSON reply forced with a schema |
+| OpenAI `gpt-4o-mini` | Groq, `llama-3.1-8b-instant` by default (`GROQ_NEWS_MODEL`) | Free tier, fast; same prompt, JSON reply with the schema in the prompt |
 | `brands.txt` | `news_brands` table | Brands can be changed without a deploy |
 
 Story keys are computed exactly as before (`md5(brand | normalised headline)`), so stories match across both.
@@ -22,7 +22,7 @@ Story keys are computed exactly as before (`md5(brand | normalised headline)`), 
 2. `python -m app.migrations.run` applies `05_news_scraper.sql` (news tables; seeds Mortein, Godrej and All Out) and
    `06_news_quality.sql` (brand `company`, verdict `prompt_version`, `news.headline_key`, refresh heartbeat).
    Both only add columns, tables and an index.
-3. Ollama running with the model: `ollama pull qwen2.5:7b` (already installed on the dev laptop).
+3. `GROQ_API_KEY` in `.env` (from https://console.groq.com/keys). Without it, stories are sorted by keyword only.
 4. Optional, in `.env`: `ZYTE_API_KEY`, used only when Google News or a site refuses a direct request.
    See `.env.example` for every news setting.
 
@@ -38,7 +38,7 @@ python -m app.news.cli refresh                                   # every active 
 python -m app.news.cli refresh --brand "Mortein"              # one brand from news_brands
 python -m app.news.cli refresh --brand "Baygon | Bayer's insect spray brand | spray"   # a brand not in the table
 python -m app.news.cli refresh --days 7 --country US          # IN, US, UK, AU, SA, DE
-python -m app.news.cli refresh --no-ai                        # keyword sorting only (no Ollama)
+python -m app.news.cli refresh --no-ai                        # keyword sorting only (no AI)
 python -m app.news.cli refresh --no-images                    # skip looking up article pictures
 python -m app.news.cli images                                    # pictures for stories not checked yet
 python -m app.news.cli images --retry-blocked                 # also retry sites that refused (via Zyte when set)
@@ -56,12 +56,12 @@ Asia/Kolkata). Only one refresh runs at a time across the admin button, the sche
 refresh writes a heartbeat every minute; one with no heartbeat for 10 minutes is taken as dead (the process
 stopped) and marked failed, so a crash never blocks the button for long.
 
-### Ollama and the deployed API
+### AI sorting on the deployed API
 
-The API on Render cannot reach Ollama on your laptop, so a refresh started there falls back to keyword
-sorting (the run says so). To keep AI sorting, run `python -m app.news.cli refresh` on the laptop with `.env`
-pointing at the production database (Supabase): the stories land in the same table the deployed app reads.
-Leave `NEWS_AUTO_REFRESH=false` on Render.
+Sorting runs on Groq, so a refresh sorts with AI wherever the API runs, as long as `GROQ_API_KEY` is set.
+`NEWS_AUTO_REFRESH=true` can be turned on in production. Groq's free tier limits requests per minute and
+per day; a batch that hits the limit is retried after a short wait, and if it still fails its headlines are
+sorted by keyword.
 
 ## How a refresh works
 
@@ -75,7 +75,7 @@ Leave `NEWS_AUTO_REFRESH=false` on Render.
    ("Market Size, Share, Forecast 2034") are dropped by a rule without asking the model. Every verdict is
    remembered in `news_story_verdicts` with the prompt version, so a headline is sent once per prompt
    version, and dropped stories do not come back in a later keyword-only run.
-3. **Fallback**: no Ollama or a failed batch means keyword sorting: a headline naming the brand is `brand`,
+3. **Fallback**: no Groq key, a usage limit or a failed batch means keyword sorting: a headline naming the brand is `brand`,
    the rest `related`.
 4. **Pictures**: each Google link is resolved to the publisher's page and its `og:image` read (logos skipped).
    A site that refuses is retried through Zyte when a key is set; a temporary failure is retried by the next
@@ -124,7 +124,7 @@ All need a signed-in user; refresh needs the admin role.
 
 ## Code
 
-`py/app/news/`: `google_news.py` (search, dedupe, brand match), `classifier.py` (Ollama sorting),
+`py/app/news/`: `google_news.py` (search, dedupe, brand match), `classifier.py` (Groq sorting),
 `images.py` (publisher link and picture), `image_proxy.py`, `store.py` (database), `refresh.py` (one refresh,
 the lock, backfill), `scheduler.py` (jobs started with the API), `cli.py` (commands). Tests: `pytest` in `py/`.
 Run every `python -m ...` command from the `py` folder with the virtual environment active.

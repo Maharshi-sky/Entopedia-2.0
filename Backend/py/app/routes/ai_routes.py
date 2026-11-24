@@ -8,7 +8,7 @@ from app.utils.logger import logger
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
-# Answers come from the provider in AI_PROVIDER (default: local Ollama); see app/services/llm.py.
+# Answers come from Groq; see app/services/llm.py.
 ASK_SYSTEM = """You are the AI assistant of Entopedia, a pest-control and competitive intelligence platform.
 Answer from the context given. Cite the record you used in square brackets, e.g. [news: <title>] or
 [patent: <number>]. If the context does not answer the question, say so plainly instead of guessing."""

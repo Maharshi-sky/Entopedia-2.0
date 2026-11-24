@@ -1,7 +1,7 @@
 """
 Sorts headlines for one brand (about the brand / its company / related / unrelated) and tags a category,
-with a local Ollama model (port of news_scraper.ai_sort, which used OpenAI gpt-4o-mini).
-When Ollama cannot be reached the scraper falls back to keyword sorting.
+with a Groq model, GROQ_NEWS_MODEL (port of news_scraper.ai_sort, which used OpenAI gpt-4o-mini).
+When Groq cannot be used (no key, usage limit) the scraper falls back to keyword sorting.
 
 PROMPT_VERSION goes into every stored verdict. Raise it whenever the prompt or the rules change: stored
 verdicts from an older version are then asked again instead of being reused.
@@ -12,7 +12,8 @@ import re
 from typing import Awaitable, Callable, Optional
 
 from app.news.types import NewsBrand, Relevance, Story
-from app.services.ollama_service import ollama_service
+from app.services import groq_service as groq
+from app.services.groq_service import groq_service
 from app.utils.logger import logger
 
 PROMPT_VERSION = 3  # 3: related limited to household pest control; checks in app/news/rules.py
@@ -25,8 +26,8 @@ CATEGORIES = [
 
 
 def news_model() -> str:
-    """The model used for sorting: OLLAMA_NEWS_MODEL, else OLLAMA_MODEL, else qwen2.5:7b."""
-    return os.getenv("OLLAMA_NEWS_MODEL") or os.getenv("OLLAMA_MODEL") or "qwen2.5:7b"
+    """The model used for sorting: GROQ_NEWS_MODEL, else llama-3.1-8b-instant."""
+    return groq.news_model()
 
 
 def _batch_size() -> int:
@@ -124,15 +125,10 @@ def is_market_report(title: str) -> bool:
 
 
 async def ai_available() -> dict:
-    """Is the model there? Checked once per refresh so a stopped Ollama costs one quick request, not a timeout per batch."""
+    """Can the model be used? Checked once per refresh, so a missing key is reported once instead of per batch."""
     model = news_model()
-    status = await ollama_service.get_status()
-    if not status["available"]:
-        return {"ok": False, "model": model, "reason": f"Ollama not reachable at {status['host']}"}
-    installed = any(m == model or m == f"{model}:latest" for m in status["models"])
-    if not installed:
-        return {"ok": False, "model": model, "reason": f"model {model} is not installed (ollama pull {model})"}
-    return {"ok": True, "model": model}
+    status = await groq_service.get_status()
+    return {"ok": True, "model": model} if status["available"] else {"ok": False, "model": model, "reason": status["reason"]}
 
 
 async def ai_sort(brand: NewsBrand, items: list[Story], on_batch: Optional[Callable[[], Awaitable[None]]] = None) -> bool:
@@ -148,7 +144,7 @@ async def ai_sort(brand: NewsBrand, items: list[Story], on_batch: Optional[Calla
         batch = items[start : start + size]
         prompt = "\n".join(f"{i}. {it.title} ({it.publisher})" for i, it in enumerate(batch))
         try:
-            reply = await ollama_service.chat_json(
+            reply = await groq_service.chat_json(
                 prompt=prompt, system=system_prompt(brand), model=news_model(),
                 schema=_reply_schema(brand), temperature=0,
                 timeout_ms=int(os.getenv("NEWS_AI_TIMEOUT_MS", "180000")),

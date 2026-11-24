@@ -6,7 +6,7 @@ What changed so the Next.js frontend can read from this API, and how to run the 
 
 ```bash
 pip install -r requirements.txt
-cp ../.env.example ../.env      # then set DB_*, JWT_SECRET (required), ANTHROPIC_API_KEY
+cp ../.env.example ../.env      # then set DB_*, JWT_SECRET (required), GROQ_API_KEY
 python -m app.migrations.run              # applies py/migrations_sql/*.sql once each (tracked in schema_migrations)
 python -m app.migrations.run --demo                 # optional: fictional demo rows for local/staging only
 python -m app.migrations.seed --email you@company.com --password '<10+ chars>' --name 'Your Name' --role admin

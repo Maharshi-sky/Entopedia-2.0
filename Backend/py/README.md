@@ -16,7 +16,8 @@ shapes, same database schema (the SQL migrations live in `migrations_sql/`).
 - **APScheduler** in place of `node-cron`
 - **python-socketio** in place of `socket.io` (websocket/socket.py mirrors the
   original, which is likewise not mounted by the app)
-- **anthropic**, **elasticsearch**, **aiohttp** mirror the corresponding JS/TS SDKs
+- **elasticsearch**, **aiohttp** mirror the corresponding JS/TS SDKs
+- AI runs on **Groq** over plain `httpx` (app/services/groq_service.py)
 
 ## Layout
 

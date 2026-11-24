@@ -1,7 +1,6 @@
 import base64
 import binascii
 import hashlib
-import os
 import re
 import uuid
 from datetime import datetime, UTC
@@ -12,14 +11,12 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from app.db.connection import db
 from app.middleware.auth import AuthUser, get_current_user, get_current_user_optional
 from app.services.activity import log_ai_query
-from app.services.ollama_service import ollama_service
+from app.services import groq_service as groq
+from app.services.groq_service import groq_service
 from app.utils.logger import logger
 
 router = APIRouter()
 
-OLLAMA_HOST = (os.getenv("OLLAMA_HOST") or "http://localhost:11434").rstrip("/")
-PREFERRED_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL") or "qwen2.5vl:7b"
-TEXT_CLASSIFIER_MODEL = os.getenv("OLLAMA_MODEL") or "qwen2.5:7b"
 
 SPECIES_PROFILES: dict[str, dict] = {
     "Aedes aegypti": {
@@ -199,29 +196,9 @@ MAX_IMAGE_BASE64 = 12_000_000  # ~9 MB picture; the browser sends ~640 px JPEGs 
 
 
 async def _resolve_vision_model() -> dict:
-    """The vision model to use: OLLAMA_VISION_MODEL if installed, else another installed vision model."""
-    try:
-        async with httpx.AsyncClient(timeout=3) as client:
-            res = await client.get(f"{OLLAMA_HOST}/api/tags")
-        if res.status_code != 200:
-            return {"available": False, "model": PREFERRED_VISION_MODEL, "reason": f"Ollama answered {res.status_code}"}
-        data = res.json()
-        models = [m["name"] for m in data.get("models", [])] if isinstance(data.get("models"), list) else []
-        prefix = PREFERRED_VISION_MODEL.split(":")[0]
-        exact = next((m for m in models if m == PREFERRED_VISION_MODEL or m.startswith(f"{prefix}:")), None)
-        if exact:
-            return {"available": True, "model": exact}
-        vision_capable = next(
-            (m for m in models if re.search(r"qwen2\.5vl|qwen2-vl|llava|gemma3|minicpm|moondream", m, re.I)), None
-        )
-        if vision_capable:
-            return {"available": True, "model": vision_capable}
-        return {
-            "available": False, "model": PREFERRED_VISION_MODEL,
-            "reason": f'no vision model is installed (run "ollama pull {PREFERRED_VISION_MODEL}")',
-        }
-    except Exception:  # noqa: BLE001
-        return {"available": False, "model": PREFERRED_VISION_MODEL, "reason": f"Ollama is not reachable at {OLLAMA_HOST}"}
+    """The vision model (GROQ_VISION_MODEL) and whether it can be used now."""
+    status = await groq_service.get_status()
+    return {"available": status["available"], "model": groq.vision_model(), "reason": status["reason"]}
 
 
 def _confidence(value) -> float:
@@ -249,7 +226,7 @@ async def _run_model(pure_base64: str, vision: dict) -> tuple[dict, str]:
     identified | unlisted | unsure | no_pest."""
     cues = "\n".join(f'- "{name}": {cue}' for name, cue in SPECIES_CUES.items())
     try:
-        reply = await ollama_service.chat_json(
+        reply = await groq_service.chat_json(
             prompt="Identify the pest in this photo.",
             system=VISION_SYSTEM.format(cues=cues),
             model=vision["model"], images=[pure_base64], schema=VISION_SCHEMA,
@@ -257,6 +234,8 @@ async def _run_model(pure_base64: str, vision: dict) -> tuple[dict, str]:
         )
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="The vision model took too long. Try a smaller, clearer photo.")
+    except groq.GroqRateLimited:
+        raise HTTPException(status_code=429, detail="The AI usage limit was reached. Try again in a minute.")
     except Exception as error:  # noqa: BLE001
         logger.error(f"Pest identification error ({vision['model']}): {error!r}")
         raise HTTPException(status_code=502, detail="The vision model could not read this photo. Try another photo.")

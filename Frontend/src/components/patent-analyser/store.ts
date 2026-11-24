@@ -212,13 +212,13 @@ export const analyserStore = {
       aiReads: keep ? state.aiReads : {},
       readContext: ctx,
       restored: null,
-      run: { ...IDLE_RUN, running: true, total, status: `Connecting to the local model for ${total} records…` },
+      run: { ...IDLE_RUN, running: true, total, status: `Connecting to the AI model for ${total} records…` },
     });
 
     let done = 0;
     let failed = 0;
     const started = Date.now();
-    let model = "Ollama";
+    let model = "Groq";
     try {
       for (let i = 0; i < total; i += BATCH_SIZE) {
         if (stopRequested) break;
@@ -274,7 +274,7 @@ export const analyserStore = {
           done,
           total,
           failed,
-          error: `${errorText(err, "Failed to read records with the local model.")}${done ? ` The ${done} read before this are kept; Continue reading picks up from there.` : ""}`,
+          error: `${errorText(err, "Failed to read records with the AI model.")}${done ? ` The ${done} read before this are kept; Continue reading picks up from there.` : ""}`,
         },
       });
     }
