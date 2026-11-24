@@ -88,6 +88,5 @@ export const api = {
   deals: () => load("deals"),
   investors: () => load("investors"),
   pests: () => load("pests"),
-  approvalChat: () => load("approvalChat"),
   auditLog: () => load("auditLog"),
 };

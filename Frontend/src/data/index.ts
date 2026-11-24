@@ -15,7 +15,6 @@ import {
 import { metrics, momentum, newsFlow, signals } from "./dashboard";
 import { deals, investorProfiles } from "./deals";
 import { articles } from "./news";
-import { approvalChat } from "./newsletter";
 import { pests } from "./pests";
 import { actives, registrations } from "./regulatory";
 
@@ -37,7 +36,6 @@ export const store = {
   deals,
   investors: investorProfiles,
   pests,
-  approvalChat,
   auditLog,
 };
 
@@ -63,6 +61,5 @@ export const resourcePaths: Record<Resource, string> = {
   deals: "deals",
   investors: "investors",
   pests: "pests",
-  approvalChat: "newsletter/approval-chat",
   auditLog: "audit-log",
 };

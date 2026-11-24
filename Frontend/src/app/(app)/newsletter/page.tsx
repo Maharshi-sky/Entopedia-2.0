@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 };
 
 export default async function NewsletterPage() {
-  const [articles, approvalChat] = await Promise.all([api.news(), api.approvalChat()]);
+  const articles = await api.news();
   return (
     <>
       <div>
@@ -16,7 +16,7 @@ export default async function NewsletterPage() {
           Compose and distribute rich intelligence digests to stakeholders
         </p>
       </div>
-      <NewsletterStudio articles={articles} approvalChat={approvalChat} />
+      <NewsletterStudio articles={articles} />
     </>
   );
 }

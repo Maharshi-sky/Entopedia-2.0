@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState } from "react";
 import {
   Bold,
   Check,
@@ -9,7 +9,6 @@ import {
   Link2,
   List,
   ListOrdered,
-  MessageSquare,
   Plus,
   Radio,
   Send,
@@ -20,7 +19,6 @@ import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { Thumbnail } from "@/components/ui/Thumbnail";
 import { categoryTone, type Article } from "@/components/news/articles";
-import type { ChatMessage as StoredMessage } from "@/data/newsletter";
 
 const inputClass =
   "w-full min-w-0 rounded-lg border border-line bg-white px-3 py-2 text-[0.9375rem] text-ink outline-none placeholder:text-gray-400 focus:border-brand";
@@ -53,76 +51,7 @@ const tools: { icon: LucideIcon; label: string; command: string }[] = [
   { icon: ImagePlus, label: "Insert image", command: "insertImage" },
 ];
 
-// Messages typed on this page are marked local: they haven't been sent anywhere.
-type ChatMessage = StoredMessage & { local?: boolean };
-
-function ApprovalChat({ initial }: { initial: StoredMessage[] }) {
-  const [messages, setMessages] = useState<ChatMessage[]>(initial);
-  const [value, setValue] = useState("");
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const text = value.trim();
-    if (!text) return;
-    setMessages((prev) => [...prev, { from: "You", text, mine: true, local: true }]);
-    setValue("");
-  }
-
-  return (
-    <Card flush className="flex flex-col overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-line bg-[#f1f3f2] px-4 py-3">
-        <MessageSquare className="size-4 text-brand" strokeWidth={1.75} />
-        <h2 className="text-[0.9375rem] font-semibold text-ink">Approval Chat</h2>
-      </div>
-      <div className="flex max-h-72 flex-col gap-3 overflow-y-auto px-4 py-4">
-        {messages.map((m, i) => (
-          <div key={i} className={m.mine ? "self-end text-right" : "self-start"}>
-            <p className="text-[0.75rem] font-semibold tracking-wider text-gray-500 uppercase">
-              {m.from}
-            </p>
-            <p
-              className={`mt-1 max-w-[18rem] border px-3 py-2 text-left text-[0.9375rem] ${
-                m.mine
-                  ? "border-brand bg-brand text-white"
-                  : "border-line bg-[#f5f6f5] text-ink"
-              }`}
-            >
-              {m.text}
-            </p>
-            {m.local && (
-              <p className="mt-1 text-[0.75rem] text-gray-400">
-                Not delivered — chat isn&apos;t connected yet
-              </p>
-            )}
-          </div>
-        ))}
-      </div>
-      <form onSubmit={handleSubmit} className="flex gap-2 border-t border-line p-3">
-        <input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          aria-label="Message"
-          placeholder="Tag @manager..."
-          className={inputClass}
-        />
-        <button
-          type="submit"
-          className="shrink-0 rounded-lg bg-brand px-4 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-brand/90"
-        >
-          Send
-        </button>
-      </form>
-    </Card>
-  );
-}
-
-export function NewsletterStudio({
-  articles,
-  approvalChat,
-}: {
-  articles: Article[];
-  approvalChat: StoredMessage[];
-}) {
+export function NewsletterStudio({ articles }: { articles: Article[] }) {
   const editorRef = useRef<HTMLDivElement>(null);
   const [inserted, setInserted] = useState<string[]>([]);
   const [preview, setPreview] = useState(false);
@@ -258,7 +187,6 @@ export function NewsletterStudio({
       </div>
 
       <div className="flex min-w-0 flex-col gap-4 lg:self-start">
-        <ApprovalChat initial={approvalChat} />
         <Card flush className="overflow-hidden">
           <div className="flex items-center gap-2 border-b border-line bg-[#f1f3f2] px-4 py-3">
             <Radio className="size-4 text-brand" strokeWidth={1.75} />
